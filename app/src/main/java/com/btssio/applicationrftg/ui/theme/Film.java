@@ -1,6 +1,9 @@
 package com.btssio.applicationrftg.ui.theme;
 
+import com.google.gson.annotations.SerializedName;
+
 public class Film {
+    @SerializedName("filmId")
     private int id;
     private String title;
     private int releaseYear;

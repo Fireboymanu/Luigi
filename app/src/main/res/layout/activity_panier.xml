@@ -16,4 +16,20 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Finaliser la réservation🛎️🎞️"/>
+
+    <Button
+        android:id="@+id/btnRetourenarrière"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Retour en arrière"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="16dp"/>
+
+    <Button
+        android:id="@+id/btnSupprimer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Supprimer"
+        android:layout_gravity="end"/>
+
 </LinearLayout>

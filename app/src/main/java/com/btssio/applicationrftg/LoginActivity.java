@@ -1,11 +1,17 @@
 package com.btssio.applicationrftg;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -19,52 +25,82 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-public class LoginActivity extends AppCompatActivity {
+public class LoginActivity extends AppCompatActivity implements AdapterView.OnItemSelectedListener {
 
     private EditText emailEditText;
     private EditText passwordEditText;
+    private EditText urlEditText; // Ajout de ce champ pour récupérer l'URL
     private Button loginButton;
     private TextView errorText;
+    private Spinner spinnerURLs;
+
+    private String[] listeURLs;
+
+    //  Modification : Utilisation d'un `ExecutorService` pour exécuter les requêtes réseau en arrière-plan
+    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
+
+    //  Modification : `Handler` pour mettre à jour l'UI après une requête réseau
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_login);
 
+        // Initialisation des éléments UI
         emailEditText = findViewById(R.id.emailInput);
         passwordEditText = findViewById(R.id.passwordInput);
         loginButton = findViewById(R.id.loginButton);
         errorText = findViewById(R.id.errorText);
+        urlEditText = findViewById(R.id.URLText); // Ajout pour récupérer l'URL manuellement
+        spinnerURLs = findViewById(R.id.spinnerURLs);
 
+        //  Modification : Initialisation du Spinner (pour choisir l'URL)
+        listeURLs = getResources().getStringArray(R.array.listeURLs);
+        ArrayAdapter<CharSequence> adapter = ArrayAdapter.createFromResource(this,
+                R.array.listeURLs, android.R.layout.simple_spinner_item);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerURLs.setAdapter(adapter);
+        spinnerURLs.setOnItemSelectedListener(this);
+
+        //  Modification : Click listener propre (plus clair et plus efficace)
         loginButton.setOnClickListener(v -> attemptLogin());
     }
 
     private void attemptLogin() {
         String email = emailEditText.getText().toString();
         String password = passwordEditText.getText().toString();
+        String urlBase = urlEditText.getText().toString(); // Récupération de l'URL entrée
 
-        // Lancer la requête de vérification
+        //  Modification : Vérification des champs vides avant la requête
+        if (email.isEmpty() || password.isEmpty()) {
+            Toast.makeText(this, "Veuillez remplir tous les champs", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        DonneesPartagees.setURLConnexion(urlBase); // Mise à jour de l'URL
         checkLoginCredentials(email, password);
     }
 
     private void checkLoginCredentials(String email, String password) {
-        // Lancer un thread pour effectuer la requête réseau en arrière-plan
-        new Thread(() -> {
+        //  Modification : Utilisation de `ExecutorService` pour éviter `NetworkOnMainThreadException`
+        executorService.execute(() -> {
             try {
-                // Créer l'URL avec l'email fourni
-                String urlString = "http://10.0.2.2:8080/toad/customer/getByEmail?email=" + email;
+                // Construction de l'URL
+                String urlString = DonneesPartagees.getURLConnexion() + "/toad/customer/getByEmail?email=" + email;
                 URL url = new URL(urlString);
+                Log.d("DEBUG_URL", "URL envoyée : " + urlString);
 
-
-
-                // Ouvrir une connexion HTTP
+                // Connexion HTTP
                 HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
                 urlConnection.setRequestMethod("GET");
-                urlConnection.setConnectTimeout(5000); // Timeout de connexion
-                urlConnection.setReadTimeout(5000);    // Timeout de lecture
+                urlConnection.setConnectTimeout(5000);
+                urlConnection.setReadTimeout(5000);
 
-                // Lire la réponse du serveur
+                // Lecture de la réponse du serveur
                 BufferedReader reader = new BufferedReader(new InputStreamReader(urlConnection.getInputStream()));
                 StringBuilder response = new StringBuilder();
                 String line;
@@ -73,57 +109,69 @@ public class LoginActivity extends AppCompatActivity {
                 }
                 reader.close();
 
-                // Si la réponse est reçue avec succès
-                String responseData = response.toString();
-                Log.d("API_RESPONSE", "Réponse reçue : " + responseData);
+                //  Modification : Utilisation de `Gson` pour convertir JSON → Objet Java
+                Customer customer = parseCustomerFromJson(response.toString());
 
-                // Vous devez analyser le JSON pour obtenir un client (pas une liste de clients)
-                Customer customer = parseCustomerFromJson(responseData);
-
-                // Appeler la méthode pour valider les informations de connexion
+                // Vérification des identifiants
                 boolean isValid = validateLogin(email, password, customer);
 
-                // Afficher un message à l'utilisateur en fonction du résultat
-                runOnUiThread(() -> {
+                SharedPreferences prefs = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+                SharedPreferences.Editor editor = prefs.edit();
+                editor.putInt("customerId", customer.getCustomerId());  // Stocke l'ID client
+                editor.apply();
+
+
+                //  Modification : Utilisation d'un `Handler` pour mettre à jour l'UI depuis le thread principal
+                handler.post(() -> {
                     if (isValid) {
-                        Toast.makeText(getApplicationContext(), "Login successful!", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(getApplicationContext(), "Connexion réussie !", Toast.LENGTH_SHORT).show();
                         Intent intent = new Intent(LoginActivity.this, AfficherListeDvdsActivity.class);
                         startActivity(intent);
-                        finish(); // Ferme l'activité de connexion
+                        finish();
                     } else {
-                        Toast.makeText(getApplicationContext(), "Invalid email or password", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(getApplicationContext(), "Email ou mot de passe incorrect", Toast.LENGTH_SHORT).show();
                     }
                 });
 
-
             } catch (IOException e) {
-                runOnUiThread(() -> {
-                    errorText.setText("Failed to connect to server."); // Éviter un texte vide
-                    errorText.setVisibility(View.VISIBLE);
-                    Toast.makeText(LoginActivity.this, "Failed to connect to server", Toast.LENGTH_SHORT).show();
+                Log.e("HTTP_ERROR", "Erreur réseau : " + e.getMessage());
+                handler.post(() -> {
+                    Toast.makeText(LoginActivity.this, "Connexion au serveur impossible", Toast.LENGTH_SHORT).show();
                 });
-
             }
-        }).start();
+        });
     }
 
-    // Méthode de validation du login
+    // Gestion du spinner pour choisir l'URL
+    @Override
+    public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+        DonneesPartagees.setURLConnexion(listeURLs[position]);
+        urlEditText.setText(listeURLs[position]); // 🔹 Modification : Met l'URL choisie dans l'input
+        Toast.makeText(getApplicationContext(), "URL sélectionnée : " + listeURLs[position], Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void onNothingSelected(AdapterView<?> parent) {}
+
+    // Vérification du login
     private boolean validateLogin(String email, String password, Customer customer) {
-        if (customer != null && customer.getEmail().equals(email)) {
-            return customer.getPassword().equals(password);
-        }
-        return false;
+        return customer != null && customer.getEmail().equals(email) && customer.getPassword().equals(password);
     }
 
-    // Exemple de méthode pour parser le client depuis un JSON (vous devez l'implémenter)
+    //  Modification : Parsing JSON amélioré (évite les crashs si JSON incorrect)
     private Customer parseCustomerFromJson(String json) {
-
         try {
-            Gson gson = new Gson();
-            return gson.fromJson(json, Customer.class); // Convertit le JSON en objet Customer
+            return new Gson().fromJson(json, Customer.class);
         } catch (JsonSyntaxException e) {
-            Log.e("JSON_PARSING", "Erreur de parsing JSON : " + e.getMessage());
+            Log.e("JSON_ERROR", "Erreur parsing JSON : " + e.getMessage());
             return null;
         }
+    }
+
+    //  Modification : Fermeture propre du `ExecutorService` pour éviter des fuites mémoire
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        executorService.shutdown();
     }
 }

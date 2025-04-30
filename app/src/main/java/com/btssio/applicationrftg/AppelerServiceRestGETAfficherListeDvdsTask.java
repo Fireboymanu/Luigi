@@ -35,7 +35,7 @@ public class AppelerServiceRestGETAfficherListeDvdsTask extends AsyncTask<URL, I
     @Override
     protected String doInBackground(URL... urls) {
             // Utiliser l'URL de l'API pour récupérer les films dans la BDD:)
-            String apiUrl = "http://10.0.2.2:8080/toad/film/all";
+            String apiUrl = DonneesPartagees.getURLConnexion() + "/toad/film/all";
             try {
                 URL url = new URL(apiUrl);
                 return appelerServiceRestHttp(url);
